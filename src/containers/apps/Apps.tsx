@@ -26,12 +26,22 @@ export default class Apps extends ApiComponent<
         showCreateAppForm: boolean
     }
 > {
+    private buildingPollTimeout: ReturnType<typeof setTimeout> | undefined
+
     constructor(props: any) {
         super(props)
         this.state = {
             isLoading: true,
             apiData: undefined,
             showCreateAppForm: false,
+        }
+    }
+
+    componentWillUnmount() {
+        // @ts-ignore
+        if (super.componentWillUnmount) super.componentWillUnmount()
+        if (this.buildingPollTimeout) {
+            clearTimeout(this.buildingPollTimeout)
         }
     }
 
@@ -59,6 +69,16 @@ export default class Apps extends ApiComponent<
             .then(function () {
                 self.setState({ isLoading: false })
             })
+    }
+
+    scheduleBuildingPoll() {
+        const self = this
+        if (self.buildingPollTimeout) {
+            clearTimeout(self.buildingPollTimeout)
+        }
+        self.buildingPollTimeout = setTimeout(function () {
+            self.reFetchData()
+        }, 3000)
     }
 
     render() {
@@ -175,15 +195,33 @@ export default class Apps extends ApiComponent<
 
     reFetchData() {
         const self = this
+
+        // Clear any pending poll before starting a new fetch
+        if (self.buildingPollTimeout) {
+            clearTimeout(self.buildingPollTimeout)
+            self.buildingPollTimeout = undefined
+        }
+
         self.setState({ isLoading: true })
         return Promise.all([
             self.apiManager.getAllApps(),
             self.apiManager.getAllProjects(),
         ])
             .then(function (data: any) {
+                const appDefinitions: IAppDef[] =
+                    data[0].appDefinitions || []
+
                 self.setState({
                     apiData: { apps: data[0], projects: data[1].projects },
                 })
+
+                // If any app is still building, schedule a poll to refresh the list
+                const anyAppBuilding = appDefinitions.some(
+                    (app) => app.isAppBuilding
+                )
+                if (anyAppBuilding) {
+                    self.scheduleBuildingPoll()
+                }
             })
             .catch(Toaster.createCatcher())
             .then(function () {
